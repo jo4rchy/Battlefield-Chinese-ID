@@ -1,12 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
+import RuntimeTimer from "./RuntimeTimer";
 
 // --- Helpers ---------------------------------------------------------------
 const GAMES = [
-  { key: "bf1", name: "战地1 (BF1)", file: "/data/bf1.txt", note: "（简体输入→繁体检索）" },
+  { key: "bf4", name: "战地4 (BF4)", file: "/data/bf4.txt", note: "" },
+  { key: "bf1", name: "战地1 (BF1)", file: "/data/bf1.txt", note: "" },
   { key: "bf5", name: "战地5 (BFV)", file: "/data/bf5.txt", note: "" },
-  { key: "bf2042", name: "战地2042", file: "/data/bf2042.txt", note: "" },
+  { key: "bf2042", name: "战地2042 (BF2042)", file: "/data/bf2042.txt", note: "" },
+  { key: "bf6", name: "战地6 (BF6)", file: "/data/bf6.txt", note: "" },
 ];
-const API_BASE = "";
+
+const API_BASE = ["http://localhost:8001/api/v1/calid/"];
 
 function classNames(...xs) { return xs.filter(Boolean).join(" "); }
 
@@ -24,7 +28,7 @@ function parseTable(text) {
   return rows;
 }
 
-function useOpenCCForBF1() {
+function useOpenCCForBF1nBF4() {
   const [convert, setConvert] = useState(null);
   const [ready, setReady] = useState(false);
   useEffect(() => {
@@ -51,13 +55,13 @@ function useOpenCCForBF1() {
   return { convert, ready };
 }
 
-
 // --- Main Component --------------------------------------------------------
 export default function App() {
-  const [activeGame, setActiveGame] = useState(GAMES[0].key);
+  const [activeGame, setActiveGame] = useState(GAMES[3].key);
   const [tables, setTables] = useState({}); // { bf1: [{hex,text}], ... }
   const [loading, setLoading] = useState({});
   const [error, setError] = useState({});
+  const [copied, setCopied] = useState(null);
 
   const [init, setInit] = useState("");     // prefix up to 7 chars
   const [target, setTarget] = useState(""); // uppercase hex
@@ -66,7 +70,7 @@ export default function App() {
   const [calcBusy, setCalcBusy] = useState(false);
 
   const [search, setSearch] = useState("");
-  const { convert: s2t, ready: openccReady } = useOpenCCForBF1();
+  const { convert: s2t, ready: openccReady } = useOpenCCForBF1nBF4();
 
   // Load tables when switching tabs
   useEffect(() => {
@@ -89,19 +93,19 @@ export default function App() {
       .finally(() => setLoading((m) => ({ ...m, [game.key]: false })));
   }, [activeGame]);
 
-  // Filter logic (BF1: 简体输入 -> 繁体匹配)
-  const [bf1ConvertedQuery, setBf1ConvertedQuery] = useState("");
+  // Filter logic (BF1/BF4: 简体输入 -> 繁体匹配)
+  const [convertedQuery, setConvertedQuery] = useState("");
   useEffect(() => {
     (async () => {
-      if (activeGame === "bf1" && s2t && search) {
+      if ((activeGame === "bf1" || activeGame === "bf4") && s2t && search) {
         try {
           const t = await s2t(search);
-          setBf1ConvertedQuery(t);
+          setConvertedQuery(t);
         } catch {
-          setBf1ConvertedQuery("");
+          setConvertedQuery("");
         }
       } else {
-        setBf1ConvertedQuery("");
+        setConvertedQuery("");
       }
     })();
   }, [search, activeGame, s2t]);
@@ -110,10 +114,10 @@ export default function App() {
     const rows = tables[activeGame] || [];
     if (!search) return rows;
     const q = search.trim().toLowerCase();
-    const qHant = activeGame === "bf1" && bf1ConvertedQuery ? bf1ConvertedQuery.trim() : null;
+    const qHant = (activeGame === "bf1" || activeGame === "bf4") && convertedQuery ? convertedQuery.trim() : null;
     return rows.filter(({ hex, text }) => {
       const hexHit = hex.toLowerCase().includes(q);
-      if (activeGame === "bf1") {
+      if (activeGame === "bf1" || activeGame === "bf4") {
         const textLC = text.toLowerCase();
         return (
           hexHit ||
@@ -123,11 +127,11 @@ export default function App() {
       }
       return hexHit || text.toLowerCase().includes(q);
     });
-  }, [tables, activeGame, search, bf1ConvertedQuery]);
+  }, [tables, activeGame, search, convertedQuery]);
 
   // Pagination (client-side)
   const [page, setPage] = useState(1);
-  const pageSize = 100; // 每页显示 100 条
+  const pageSize = 200; // 每页显示 200 条
   useEffect(() => { setPage(1); }, [activeGame, search]);
   const pageCount = Math.max(1, Math.ceil((filteredRows?.length || 0) / pageSize));
   const pageRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
@@ -158,8 +162,8 @@ export default function App() {
       alert("target 需为纯十六进制且大写，例如 00B91163");
       return;
     }
-    if (init.length > 7 || !/^[A-Za-z0-9_-]*$/.test(init)) {
-      alert("init 仅允许字母/数字/下划线/中横线，且最长 7 位");
+    if (init.length > 8 || !/^[A-Za-z0-9_-]*$/.test(init)) {
+      alert("init 仅允许字母/数字/下划线/中横线，且最长 8 位");
       return;
     }
 
@@ -168,7 +172,9 @@ export default function App() {
       const url = new URL(API_BASE);
       url.searchParams.set("init", init || "");
       url.searchParams.set("target", target);
-      url.searchParams.set("clan", clan || ""); // 避免传 null
+      if (activeGame !== "bf2042") {
+        url.searchParams.set("clan", clan || ""); // 避免传 null
+      }
 
       if (DEBUG) {
         console.group("[CALID] 请求");
@@ -242,57 +248,62 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="sticky top-0 z-30 backdrop-blur bg-white/70 border-b border-slate-200">
+      <header className="bg-white border-b border-slate-200">
         <div className="max-w-6xl mx-auto px-4 py-4 flex flex-col gap-3">
           <h1 className="text-2xl font-bold tracking-tight">Battlefield 中文 ID 计算器</h1>
-          <p className="text-sm text-slate-600">支持战地1 / 战地5 / 战地2042。每个游戏有独立哈希表；BF1 支持“简体输入→繁体检索”。</p>
+          <p className="text-sm text-slate-600">支持 战地4 / 战地1 / 战地5 / 战地2042 / 战地6。每个游戏有独立哈希表；BF1/BF4 支持“简体输入→繁体检索”。</p>
+          <p className="text-sm text-slate-600">
+            B站关注我 <a href="https://space.bilibili.com/35670010" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">很大的小棒槌</a> ，BFV曾经CN TOP10， BF2042目前CN TOP10。
+          </p>
+          <p className="text-sm text-slate-600">
+            一键加入 <a href="https://qm.qq.com/q/qh6htZCv3c" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">战地开黑交流群</a>
+          </p>
+
 
           <div className="flex flex-wrap gap-3 items-end">
             <div>
-              <label className="block text-xs font-medium mb-1">init（自定义前缀，可为空，最多 7 位）</label>
+              <label className="block text-xs font-medium mb-1">自定义前缀（可为空，最多 8 位）</label>
               <input
                 value={init}
                 onChange={(e) => {
                   const raw = e.target.value;
                   // 只保留 A-Z a-z 0-9 _ -
-                  const cleaned = raw.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 7);
+                  const cleaned = raw.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 8);
                   setInit(cleaned);
                 }}
                 placeholder="例如：BilITV-"
-                className="border rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-[220px] w-full"
+                className="border rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-[200px] w-full"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium mb-1">target（目标哈希值，十六进制）</label>
+              <label className="block text-xs font-medium mb-1">目标哈希值（十六进制）</label>
               <input
                 value={target}
                 onChange={(e) => onTargetChange(e.target.value)}
                 placeholder="例如：00B91163"
-                className="border rounded-xl px-3 py-2 tracking-widest font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-[300px] w-full"
+                className="border rounded-xl px-3 py-2 tracking-widest font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-[200px] w-full"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium mb-1">
-                clan（战排，可为空）
-                {activeGame === "bf2042" && (
-                  <span className="ml-2 text-amber-600">（战地2042不支持战排）</span>
-                )}
-              </label>
+              <label className="block text-xs font-medium mb-1">代表战排（可为空）</label>
               <input
                 value={clan}
                 onChange={(e) => {
-                  if (activeGame === "bf2042") return;           // 2042 不可编辑
-                  setClan(e.target.value.slice(0, 4));           // BF1/BFV 最多 4 位
+                  if (activeGame === "bf2042" || activeGame === "bf6") return;
+                  const raw = e.target.value;
+                  // 只保留 A-Z a-z 0-9 _ -
+                  const cleaned = raw.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 4);
+                  setClan(cleaned);
                 }}
                 placeholder={
-                  activeGame === "bf2042" ? "战地2042不支持战排" : "输入你要代表的战排"
+                  activeGame === "bf2042" || activeGame === "bf6" ? "战地2042/6不支持战排" : "输入你要代表的战排"
                 }
-                maxLength={activeGame === "bf2042" ? undefined : 4}
-                disabled={activeGame === "bf2042"}
-                className="border rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-[220px] w-full disabled:opacity-50 disabled:cursor-not-allowed"
-                aria-disabled={activeGame === "bf2042"}
+                maxLength={activeGame === "bf2042" || activeGame === "bf6" ? undefined : 4}
+                disabled={activeGame === "bf2042" || activeGame === "bf6"}
+                className="border rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-[200px] w-full disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-disabled={activeGame === "bf2042" || activeGame === "bf6"}
               />
             </div>
 
@@ -308,7 +319,7 @@ export default function App() {
                 计算
               </button>
 
-              <select
+              {/* <select
                 value={activeGame}
                 onChange={(e) => setActiveGame(e.target.value)}
                 className="h-10 rounded-xl border px-2"
@@ -316,7 +327,7 @@ export default function App() {
                 {GAMES.map((g) => (
                   <option key={g.key} value={g.key}>{g.name}</option>
                 ))}
-              </select>
+              </select> */}
             </div>
           </div>
 
@@ -325,14 +336,74 @@ export default function App() {
               "rounded-2xl border p-3",
               calcRes.ok ? "border-emerald-300 bg-emerald-50" : "border-rose-300 bg-rose-50"
             )}>
-              <div className="text-sm font-medium mb-2">计算结果</div>
-
+              <div className="text-sm font-medium mb-2">计算结果，将EA ID修改成以下任意ID即可</div>
               {calcRes.ok ? (
-                <div className="flex items-center gap-2">
-                  <div className="text-xs text-slate-600">最终中文ID：</div>
-                  <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white border font-mono text-lg">
-                    {String((calcRes.data && calcRes.data.result) || "")}
-                  </div>
+                <div className="w-full">
+                  <div className="text-xs text-slate-600 mb-2">可用中文ID：</div>
+                  {(activeGame === "bf1") && (
+                    <div className="text-sm text-amber-700 mb-2">
+                      注意：战地1（BF1）能否使用中文ID请参阅具体服务器规定。
+                    </div>
+                  )}
+                  {(activeGame === "bf5") && (
+                    <div className="text-sm text-amber-700 mb-2">
+                      注意：战地5（BFV）社区机器人将中文ID判定为违规，请谨慎使用！！！
+                    </div>
+                  )}
+                  {(activeGame === "bf6") && (
+                    <>
+                      <div className="text-sm text-amber-700 mb-2">
+                        注意：战地6（BF6）建议通过Steam登陆来展示个性化中文ID。
+                      </div>
+                      <div className="text-sm text-amber-700 mb-2">
+                        此方法仅适用于EA购买/启动游戏的玩家。
+                      </div>
+                    </>
+                  )}
+                  {Array.isArray(calcRes.data?.result) ? (
+                    <div className="max-h-64 overflow-auto space-y-2">
+                      {calcRes.data.result.map((id, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center justify-between gap-3 rounded-lg border bg-white px-3 py-2"
+                        >
+                          <code className="font-mono text-sm break-words">{String(id)}</code>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(String(id));
+                                setCopied(i);
+                                setTimeout(() => setCopied(null), 1200);
+                              } catch (_) {}
+                            }}
+                            className="shrink-0 rounded-md border px-2 py-1 text-xs bg-slate-50 hover:bg-slate-100"
+                            title="复制此 ID"
+                          >
+                            {copied === i ? "已复制" : "复制"}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-3 rounded-lg border bg-white px-3 py-2">
+                      <span className="font-mono text-lg break-words">
+                        {String(calcRes.data?.result ?? "")}
+                      </span>
+                      <button
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(String(calcRes.data?.result ?? ""));
+                            setCopied("single");
+                            setTimeout(() => setCopied(null), 1200);
+                          } catch (_) {}
+                        }}
+                        className="shrink-0 rounded-md border px-2 py-1 text-xs bg-slate-50 hover:bg-slate-100"
+                        title="复制"
+                      >
+                        {copied === "single" ? "已复制" : "复制"}
+                      </button>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-sm text-rose-700">
@@ -371,10 +442,10 @@ export default function App() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索 HEX 或中文…（BF1 支持简体→繁体匹配）"
+            placeholder="搜索 HEX 或中文…（BF1/BF4 支持简体→繁体匹配）"
             className="flex-1 border rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
-          {activeGame === "bf1" && (
+          {(activeGame === "bf1" || activeGame === "bf4") && (
             <div className="text-xs text-slate-600">
               简繁转换：{openccReady ? <span className="text-emerald-600">已启用</span> : <span className="text-amber-600">未启用（降级为普通搜索）</span>}
             </div>
@@ -420,7 +491,7 @@ export default function App() {
           )}
         </div>
 
-        {/* Pagination */}
+        {/* 选页 */}
         <div className="mt-3 flex items-center justify-between text-sm">
           <div>共 <b>{filteredRows.length}</b> 条；第 <b>{page}</b>/<b>{pageCount}</b> 页</div>
           <div className="flex gap-2">
@@ -433,6 +504,22 @@ export default function App() {
             <button onClick={() => setPage(pageCount)} disabled={page === pageCount}
                     className="px-3 py-1 rounded-lg border bg-white disabled:opacity-40">末页 »</button>
           </div>
+        </div>
+
+        {/* GitHub Link */}
+        <div className="mt-6 text-xs text-slate-500">
+          <li>由 <a href="https://github.com/jo4rchy" className="underline">jo4rchy</a> 协助ChatGPT制作。项目开源，欢迎在 <a href="https://github.com/jo4rchy/Battlefield-Chinese-ID" className="underline">GitHub</a> 上贡献代码。</li>
+          <li>关注 <a href="https://space.bilibili.com/35670010" className="underline">我的Bilibili</a> ，战地风云超级老登。</li>
+        </div>
+        
+        {/* 不蒜子计数器 */}
+        <div className="mt-6 text-xs text-slate-500">
+          <span id="busuanzi_container_site_pv">本站总访问量<span id="busuanzi_value_site_pv"></span>次</span>
+        </div>
+
+        {/* 运行时间 */}
+        <div className="mt-2 text-xs text-slate-500">
+          <RuntimeTimer since="2025-09-27T19:00:00+01:00" />
         </div>
       </main>
     </div>
